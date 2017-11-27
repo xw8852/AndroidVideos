@@ -16,6 +16,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.FrameLayout.LayoutParams;
 
 import java.io.IOException;
@@ -36,6 +37,7 @@ public class CameraActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().requestFeature(Window.FEATURE_NO_TITLE);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_camera);
         if (getActionBar() != null) getActionBar().hide();
 
@@ -45,6 +47,7 @@ public class CameraActivity extends Activity {
             @Override
             public void onClick(View v) {
                 try {
+                    // 切换前后摄像头
                     ++cameraIndex;
                     cameraIndex = cameraIndex % cameraCount;
                     camera.stopPreview();
@@ -74,35 +77,17 @@ public class CameraActivity extends Activity {
                 if (camera == null) return;
                 int degrees = calculateRatotion();
                 camera.setDisplayOrientation(degrees);
+                size = getPreviewSize(degrees);
+                int height;
                 int width = mSurfaceView.getMeasuredWidth();
-                int height = mSurfaceView.getMeasuredHeight();
-                if (degrees % 180 != 1) {
-                    width = height;
-                    height = mSurfaceView.getMeasuredWidth();
+
+                if (degrees % 180 != 0) {
+                    height = width * size.width / size.height;
+                } else {
+                    height = width * size.height / size.width;
                 }
 
-                float ratio = 0;
-                int piexls = width * height;
-
-                List<Camera.Size> sizeList = camera.getParameters().getSupportedPreviewSizes();
-                float originRatio = width / (height + 0.0f);
-                for (Camera.Size _size : sizeList) {
-                    if (size == null) {
-                        ratio = (_size.width + 0.0f) / _size.height;
-                        size = _size;
-                    }
-                    if (_size.width * _size.height < piexls) continue;
-                    float _ratio = (_size.width + 0.0f) / _size.height;
-                    if (Math.abs(originRatio - _ratio) < Math.abs(originRatio - ratio)) {
-                        if (_size.width * _size.height > width * height) {
-                            size = _size;
-                            ratio = (_size.width + 0.0f) / _size.height;
-                        }
-                    }
-                }
-
-
-                mSurfaceView.setLayoutParams(new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height * size.width / size.height));
+                mSurfaceView.setLayoutParams(new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height));
 
 
                 Camera.Parameters parameters = camera.getParameters();
@@ -152,6 +137,10 @@ public class CameraActivity extends Activity {
         }
     }
 
+    /**
+     * 计算合适的预览角度
+     * @return
+     */
     public int calculateRatotion() {
         int rotation = getWindowManager().getDefaultDisplay().getRotation();
         int degrees = 0;
@@ -171,7 +160,7 @@ public class CameraActivity extends Activity {
         }
         Camera.CameraInfo info = new Camera.CameraInfo();
         Camera.getCameraInfo(cameraIndex, info);
-        Log.d("MSG", " orientation - " + info.orientation + "," + info.facing + ", degrees " + degrees);
+
         if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
             degrees = (info.orientation + degrees) % 360;
             degrees = (360 - degrees) % 360;
@@ -181,11 +170,53 @@ public class CameraActivity extends Activity {
         return degrees;
     }
 
+    /**
+     * 获取合适的预览尺寸
+     * @param degrees
+     * @return
+     */
+    public Camera.Size getPreviewSize(int degrees) {
+        Camera.Size size = null;
+        int width = mSurfaceView.getMeasuredWidth();
+        int height = mSurfaceView.getMeasuredHeight();
+        if (degrees % 180 != 0) {
+            width = height;
+            height = mSurfaceView.getMeasuredWidth();
+        }
+
+        float ratio = 0;
+        int piexls = width * height;
+
+        List<Camera.Size> sizeList = camera.getParameters().getSupportedPreviewSizes();
+        float originRatio = width / (height + 0.0f);
+        for (Camera.Size _size : sizeList) {
+            if (size == null) {
+                ratio = (_size.width + 0.0f) / _size.height;
+                size = _size;
+            }
+            //防止预览尺寸过小
+            if (_size.width * _size.height < piexls / 2) continue;
+            float _ratio = (_size.width + 0.0f) / _size.height;
+            // 匹配误差最小的预览尺寸
+            if (Math.abs(originRatio - _ratio) < Math.abs(originRatio - ratio)) {
+                if (_size.width * _size.height > width * height) {
+                    size = _size;
+                    ratio = (_size.width + 0.0f) / _size.height;
+                }
+            }
+        }
+
+
+        return size;
+    }
 
     Camera camera;
     int cameraIndex = 0;
     int cameraCount = 0;
 
+    /**
+     * 实例化摄像头 仅surfaceCreated调用
+     */
     void init() {
         cameraCount = Camera.getNumberOfCameras();
         if (cameraCount <= 0) {
@@ -212,10 +243,32 @@ public class CameraActivity extends Activity {
         }
     }
 
+    /**
+     * 摄像头旋转，重新设置参数
+     * @param newConfig
+     */
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        camera.stopPreview();
         camera.setDisplayOrientation(calculateRatotion());
-        new IllegalAccessException(" configuration ").printStackTrace();
+        int degrees = calculateRatotion();
+        camera.setDisplayOrientation(degrees);
+        size = getPreviewSize(degrees);
+        int height;
+        int width = mSurfaceView.getMeasuredWidth();
+
+        if (degrees % 180 != 0) {
+            height = width * size.width / size.height;
+        } else {
+            height = width * size.height / size.width;
+        }
+        mSurfaceView.setLayoutParams(new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height));
+        Camera.Parameters parameters = camera.getParameters();
+        parameters.setPreviewSize(size.width, size.height);
+        parameters.setFocusMode(FOCUS_MODE_CONTINUOUS_PICTURE);
+        camera.setParameters(parameters);
+        camera.cancelAutoFocus();
+        camera.startPreview();
     }
 }
